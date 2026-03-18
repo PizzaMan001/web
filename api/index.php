@@ -132,7 +132,7 @@
                 <i class="fas fa-play-circle text-primary me-2"></i>SPORTS<span class="text-primary">BD</span>
             </a>
             <div class="ms-auto">
-                 <a class="btn btn-primary btn-sm rounded-pill px-3" href="playlist.php">
+                 <a class="btn btn-primary btn-sm rounded-pill px-3" href="playlist">
                     <i class="fas fa-cloud-download-alt me-1"></i> M3U Playlist
                 </a>
             </div>
@@ -201,14 +201,14 @@
                 if (!Hls.isSupported()) return alert("HLS not supported.");
 
                 hls = new Hls({ lowLatencyMode: true });
-                hls.loadSource(`player.php?channel=${channelId}`);
+                hls.loadSource(`player/?channel=${channelId}`);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
             }
 
             function updateStreamLink(channelId) {
                 streamLinkEl.textContent = 'Requesting secure link...';
-                fetch(`player.php?action=get_link&channel=${channelId}`)
+                fetch(`player/?action=get_link&channel=${channelId}`)
                     .then(r => r.text())
                     .then(link => { streamLinkEl.textContent = link; })
                     .catch(() => { streamLinkEl.textContent = 'Error connecting to source.'; });
@@ -246,7 +246,7 @@
             }
 
             // Initial Fetch
-            fetch('player.php?action=get_channels')
+            fetch('player/?action=get_channels')
                 .then(r => r.json())
                 .then(data => {
                     channelsData = data;
