@@ -1,122 +1,112 @@
 <?php
+/**
+ * PHP Stream Extractor & Player
+ * Combines Scraping, Token Extraction, and Video.js
+ */
+
 error_reporting(0);
-require_once 'channels'; // Use the central channel list
+require_once 'channels.php';
 
-// --- SCRIPT ROUTER ---
-$action = isset($_GET['action']) ? $_GET['action'] : 'proxy';
+// --- INPUT HANDLING ---
+$id = isset($_GET['id']) ? $_GET['id'] : 'star1in';
+$action = isset($_GET['action']) ? $_GET['action'] : 'player';
 
-switch ($action) {
-    case 'get_channels':
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($channels, JSON_UNESCAPED_UNICODE);
-        break;
-
-    case 'get_link':
-        $channel_id = isset($_GET['channel']) ? $_GET['channel'] : 'skysme';
-        get_and_echo_master_link($channel_id);
-        break;
-
-    case 'proxy':
-    default:
-        $channel_id = isset($_GET['channel']) ? $_GET['channel'] : 'skysme';
-        proxy_hls_stream($channel_id);
-        break;
-}
-exit;
-
-// --- CORE FUNCTIONS ---
-
-function get_master_stream_link($channel_id) {
+// --- CORE EXTRACTION FUNCTION ---
+function get_final_stream_url($channel_id) {
     global $channels;
     if (!isset($channels[$channel_id])) return null;
 
-    $selected_channel = $channels[$channel_id];
-    $premium_php_url = "https://profamouslife.com/premium.php?player=desktop&live={$channel_id}";
-    $initial_referer_url = $selected_channel['referer'];
+    $selected = $channels[$channel_id];
+    $target_url = "https://profamouslife.com/premium.php?player=desktop&live=" . $channel_id;
+    $referer = $selected['referer'];
 
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_URL => $premium_php_url,
-        CURLOPT_RETURNTRANSFER => 1,
-        CURLOPT_TIMEOUT => 10,
+        CURLOPT_URL => $target_url,
+        CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTPHEADER => [
-            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer: ' . $initial_referer_url
-        ]
+        CURLOPT_REFERER => $referer,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        CURLOPT_TIMEOUT => 12
     ]);
-    $response = curl_exec($ch);
+    
+    $html = curl_exec($ch);
     curl_close($ch);
 
-    if ($response && preg_match('/return\(\[(.*?)\]\.join/', $response, $matches)) {
-        $char_list_str = str_replace(array("\'", '"'), '', $matches[1]);
-        $char_list = explode(',', $char_list_str);
-        return str_replace('\\/', '/', implode('', $char_list));
+    if (!$html) return null;
+
+    // 1. Reconstruct URL from the JS Array logic
+    if (preg_match('/return\s*\(\s*\[\s*"h"\s*,\s*"t"\s*(.*?)\.join\(""\)/s', $html, $matches)) {
+        $url_body = str_replace(['"', ',', ' ', "\n", "\r", "\t", "[", "]"], '', $matches[1]);
+        $base_url = "ht" . $url_body;
+
+        // 2. Extract the Dynamic Token from the DOM
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html);
+        
+        // Check multiple possible IDs for the token
+        $token_el = $dom->getElementById('enscSiutarfBghaikt') ?: $dom->getElementById('suaeiikScntaBrfthg');
+        $token = ($token_el) ? trim($token_el->nodeValue) : "";
+
+        // 3. Final Cleanup
+        $final_link = str_replace(['\\', ']', '"', "'"], '', $base_url . $token);
+        return trim($final_link);
     }
     return null;
 }
 
-function get_and_echo_master_link($channel_id) {
-    header("Content-Type: text/plain");
-    $link = get_master_stream_link($channel_id);
-    if ($link) {
-        echo $link;
+// --- ROUTING ---
+
+// If action is get_link, we redirect the player to the final .m3u8
+if ($action === 'get_link') {
+    $link = get_final_stream_url($id);
+    if ($link && strpos($link, 'http') === 0) {
+        header("Location: $link");
     } else {
-        http_response_code(502);
-        echo "Error: Could not fetch stream link.";
+        http_response_code(404);
+        echo "Error: Stream link expired or not found.";
     }
+    exit;
 }
 
-function proxy_hls_stream($channel_id) {
-    global $channels;
-    if (!isset($channels[$channel_id])) { http_response_code(404); die("Channel not found."); }
-    
-    $self_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://$_SERVER[HTTP_HOST]" . strtok($_SERVER["REQUEST_URI"], '?');
-    $stream_referer_url = "https://profamouslife.com/premium.php?player=desktop&live={$channel_id}";
-    $url_to_proxy = '';
-
-    if (isset($_GET['proxy_url'])) {
-        $decoded_url_b64 = base64_decode(trim($_GET['proxy_url']), true);
-        if ($decoded_url_b64) $url_to_proxy = $decoded_url_b64;
-    } else {
-        $url_to_proxy = get_master_stream_link($channel_id);
-    }
-
-    if (!$url_to_proxy || !filter_var($url_to_proxy, FILTER_VALIDATE_URL)) {
-        http_response_code(400); die("Invalid or missing URL to proxy.");
-    }
-
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url_to_proxy,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 20,
-        CURLOPT_HTTPHEADER => ['Referer: ' . $stream_referer_url, 'User-Agent: Mozilla/5.0']
-    ]);
-    $content = curl_exec($ch);
-    $content_type = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-    curl_close($ch);
-
-    if ($content === false) { http_response_code(502); die("Fetch failed."); }
-
-    header("Access-Control-Allow-Origin: *");
-    header("Content-Type: " . $content_type);
-
-    if (strpos($content_type, 'mpegurl') !== false) {
-        $base_url = substr($url_to_proxy, 0, strrpos($url_to_proxy, '/') + 1);
-        $lines = explode("\n", $content);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line && $line[0] !== '#') {
-                $absolute_url = (preg_match('#^https?://#i', $line)) ? $line : $base_url . $line;
-                echo $self_url . '?channel=' . $channel_id . '&proxy_url=' . base64_encode($absolute_url) . "\n";
-            } else {
-                echo $line . "\n";
-            }
-        }
-    } else {
-        echo $content;
-    }
-}
+// Default Action: Load the HTML5 Player UI
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stream - <?php echo $channels[$id]['name']; ?></title>
+    
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; margin: 0; padding: 20px; text-align: center; }
+        .player-box { max-width: 960px; margin: 20px auto; background: #111; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+        .nav-bar { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+        .btn { padding: 10px 18px; background: #e91e63; color: white; text-decoration: none; border-radius: 4px; font-size: 14px; transition: 0.2s; }
+        .btn:hover { background: #ad1457; }
+        .active { background: #666; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <h2>Watching: <?php echo $channels[$id]['name']; ?></h2>
+
+    <div class="player-box">
+        <video id="my-video" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto" width="960" data-setup='{}'>
+            <source src="index.php?action=get_link&id=<?php echo $id; ?>" type="application/x-mpegURL">
+        </video>
+    </div>
+
+    <div class="nav-bar">
+        <?php foreach ($channels as $key => $val): ?>
+            <a href="?id=<?php echo $key; ?>" class="btn <?php echo ($id == $key) ? 'active' : ''; ?>">
+                <?php echo $val['name']; ?>
+            </a>
+        <?php endforeach; ?>
+    </div>
+
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+</body>
+</html>
