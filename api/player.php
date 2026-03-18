@@ -1,6 +1,6 @@
 <?php
 error_reporting(0);
-require_once 'channels.php'; // Use the central channel list
+require_once 'channels'; // Use the central channel list
 
 // --- SCRIPT ROUTER ---
 $action = isset($_GET['action']) ? $_GET['action'] : 'proxy';
