@@ -201,14 +201,14 @@
                 if (!Hls.isSupported()) return alert("HLS not supported.");
 
                 hls = new Hls({ lowLatencyMode: true });
-                hls.loadSource(`player/?channel=${channelId}`);
+                hls.loadSource(`player?channel=${channelId}`);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
             }
 
             function updateStreamLink(channelId) {
                 streamLinkEl.textContent = 'Requesting secure link...';
-                fetch(`player/?action=get_link&channel=${channelId}`)
+                fetch(`player?action=get_link&channel=${channelId}`)
                     .then(r => r.text())
                     .then(link => { streamLinkEl.textContent = link; })
                     .catch(() => { streamLinkEl.textContent = 'Error connecting to source.'; });
@@ -246,7 +246,7 @@
             }
 
             // Initial Fetch
-            fetch('player/?action=get_channels')
+            fetch('player?action=get_channels')
                 .then(r => r.json())
                 .then(data => {
                     channelsData = data;
